@@ -619,7 +619,8 @@ def feature_engineering(apps, prev, bureau, bureau_bal, pos_bal, install, card_b
     
     return apps_all
 def main():
-    apps, prev, bureau, bureau_bal, pos_bal, install, card_bal = load_data()
+    PATH = 'insert_the_directory_here'
+    apps, prev, bureau, bureau_bal, pos_bal, install, card_bal = load_data(PATH)
     all_data = feature_engineering(apps, prev, bureau, bureau_bal, pos_bal, install, card_bal)
     all_data = all_data.collect()
 
