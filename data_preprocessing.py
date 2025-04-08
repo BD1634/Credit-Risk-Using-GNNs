@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 
-raw_data_dir = './data/home-credit-default-risk/'
+raw_data_dir = './dataset/home-credit-default-risk/'
 
 
 def get_balance_data():
