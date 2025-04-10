@@ -23,4 +23,4 @@ parser.add_argument('--beta_', type=float, default=0.0)
 opt, _ = parser.parse_known_args()
 
 def get_device():
-    return torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+    return torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
