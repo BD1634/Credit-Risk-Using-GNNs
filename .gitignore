@@ -1,3 +1,4 @@
 /FAGNN/dataset
-/runs
-/node_transitions
+/FAGNN/runs
+/FAGNN/node_transitions
+/FAGNN/models
