@@ -4,7 +4,7 @@ import argparse
 import torch.optim as optim
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--data_load_path', default='./dataset/home-credit-default-risk/')
+parser.add_argument('--data_load_path', default='./models/')
 parser.add_argument('--theta_m', type=float, default=0.3)
 parser.add_argument('--theta_u', type=int, default=20)
 parser.add_argument('--up_sample', type=float, default=0.0)
@@ -23,4 +23,4 @@ parser.add_argument('--beta_', type=float, default=0.0)
 opt, _ = parser.parse_known_args()
 
 def get_device():
-    return torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    return torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
