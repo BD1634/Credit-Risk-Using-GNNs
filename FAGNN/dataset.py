@@ -1,7 +1,7 @@
 # ---- dataset.py ----
 import numpy as np
 import pandas as pd
-from .utils import containsAny
+from utils import containsAny
 from imblearn.over_sampling import SMOTE
 from sklearn.metrics import roc_curve, auc
 

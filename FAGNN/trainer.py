@@ -1,23 +1,22 @@
-#trainer.py
+# ---- trainer.py ----
 import os
 import time
 import torch
 import random
-import pickle
 import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.utils.data as Data
 import torch.nn.functional as F
-from .dataset import auc_calculate
-from .config import opt, get_device
-from .model import CLASS_NN_Embed_cluster
-from .utils import intermediate_feature_distance
+from dataset import auc_calculate
+from config import opt, get_device
+from model import CLASS_NN_Embed_cluster
+from monitor import track_node_representations
+from utils import intermediate_feature_distance
 from torch.utils.tensorboard import SummaryWriter
 
 
-
-def training_model_classification(data_all, clusters, value_column, embed_column, bag_size, f=None):
+def training_model_classification(data_all, clusters, value_column, embed_column, bag_size, sk_ids, f=None):
     device = get_device()
 
     if opt.up_sample:
@@ -26,6 +25,7 @@ def training_model_classification(data_all, clusters, value_column, embed_column
         positive_df = pd.DataFrame(np.repeat(data_all.loc[pos_idx].values, int(opt.up_sample), axis=0), columns=data_all.columns)
         data_all = pd.concat([positive_df, data_all.loc[neg_idx]])
         clusters = [clusters[i] for i in (pos_idx * int(opt.up_sample) + neg_idx)]
+        sk_ids = [sk_ids[i] for i in (pos_idx * int(opt.up_sample) + neg_idx)]
 
     if opt.down_sample:
         pos_idx = data_all[data_all['TARGET'] == 1].index.tolist()
@@ -33,6 +33,7 @@ def training_model_classification(data_all, clusters, value_column, embed_column
         neg_sample_idx = random.sample(neg_idx, int(opt.down_sample * len(neg_idx)))
         data_all = pd.concat([data_all.loc[pos_idx], data_all.loc[neg_sample_idx]])
         clusters = [clusters[i] for i in pos_idx + neg_sample_idx]
+        sk_ids = [sk_ids[i] for i in pos_idx + neg_sample_idx]
 
     val_index, train_index = [], []
     val_clusters, train_clusters = [], []
@@ -46,6 +47,8 @@ def training_model_classification(data_all, clusters, value_column, embed_column
 
     val_df = data_all.iloc[val_index]
     train_df = data_all.iloc[train_index]
+    val_sk_ids = [sk_ids[i] for i in val_index]
+    train_sk_ids = [sk_ids[i] for i in train_index]
 
     def create_loader(df, cluster_list):
         value_tensor = torch.tensor(df[value_column].values).float()
@@ -69,9 +72,7 @@ def training_model_classification(data_all, clusters, value_column, embed_column
     criterion_cls = nn.CrossEntropyLoss()
     criterion_ae = nn.MSELoss()
 
-    # 🔥 Initialize TensorBoard writer
     writer = SummaryWriter(log_dir=os.path.join("runs", time.strftime("%Y-%m-%d_%H-%M-%S")))
-
     best_auc_val = 0
     count = 0
 
@@ -88,7 +89,6 @@ def training_model_classification(data_all, clusters, value_column, embed_column
             loss = opt.lambda_ * loss_cls + opt.alpha_ * loss_ae + opt.beta_ * loss_cos
             loss.backward()
 
-            # Log gradient histogram
             for name, param in model.named_parameters():
                 if param.grad is not None:
                     writer.add_histogram(f"gradients/{name}", param.grad, epoch)
@@ -98,41 +98,46 @@ def training_model_classification(data_all, clusters, value_column, embed_column
 
         scheduler.step()
         avg_loss = total_loss / len(train_loader)
-
         print(f"Loss in Epoch {epoch}: {avg_loss}")
-        if f:
-            f.write(f"Loss in Epoch {epoch}: {avg_loss}\n")
-
+        if f: f.write(f"Loss in Epoch {epoch}: {avg_loss}\n")
         writer.add_scalar("Loss/train", avg_loss, epoch)
+        writer.add_scalar("Loss/classification", loss_cls.item(), epoch)
+        writer.add_scalar("Loss/autoencoder", loss_ae.item(), epoch)
+        writer.add_scalar("Loss/cosine", loss_cos.item(), epoch)
+        writer.add_scalar("LearningRate", scheduler.get_last_lr()[0], epoch)
 
-        # Validation AUC
-        auc_val = []
+        # Validation pass (accumulate all for AUC + PCA)
+        all_probs, all_labels = [], []
+        all_inter = []
+
         model.eval()
         with torch.no_grad():
             for val, emb, clu, lab in val_loader:
                 val, emb, clu = val.to(device), emb.to(device), clu.to(device)
-                outputs, _, _ = model(val, emb, clu)
+                outputs, _, inter_val = model(val, emb, clu)
                 probs = F.softmax(outputs, dim=-1)[:, 1].cpu().numpy()
-                auc_val.append(auc_calculate(lab.numpy(), probs))
+                all_probs.extend(probs)
+                all_labels.extend(lab.numpy())
+                all_inter.append(inter_val.cpu())
 
-        val_auc = np.mean(auc_val)
+        val_auc = auc_calculate(np.array(all_labels), np.array(all_probs))
         print(f"Val AUC in Epoch {epoch}: {val_auc}")
-        if f:
-            f.write(f"Val AUC in Epoch {epoch}: {val_auc}\n")
-
+        if f: f.write(f"Val AUC in Epoch {epoch}: {val_auc}\n")
         writer.add_scalar("AUC/val", val_auc, epoch)
+
+        # Visualize node embeddings of the full validation set
+        if epoch % 5 == 0:
+            full_inter_tensor = torch.cat(all_inter, dim=0)
+            track_node_representations(epoch, full_inter_tensor, val_sk_ids, output_dir="node_transitions")
 
         if val_auc > best_auc_val:
             best_auc_val = val_auc
-            best_model = model
+            torch.save(model.state_dict(), os.path.join(opt.data_load_path, f"best_model_epoch{epoch}.pth"))
             count = 0
-            print(f"Best Val AUC in Epoch {epoch}: {best_auc_val}")
         else:
             count += 1
 
         if count > 10:
-            path = os.path.join(opt.data_load_path, f"best_model_epoch{epoch}.pth")
-            torch.save(best_model.state_dict(), path)
             print(f"Early stopping triggered at Epoch {epoch}. Best model saved.")
             break
 
