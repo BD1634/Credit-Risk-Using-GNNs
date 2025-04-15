@@ -2,3 +2,7 @@
 /FAGNN/runs
 /FAGNN/node_transitions
 /FAGNN/models
+/SAGNN/dataset
+/SAGNN/runs
+/SAGNN/node_transitions
+/SAGNN/models
