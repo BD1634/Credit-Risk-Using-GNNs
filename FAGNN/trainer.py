@@ -124,12 +124,13 @@ def training_model_classification(data_all, clusters, value_column, embed_column
         if f: f.write(f"Val AUC in Epoch {epoch}: {val_auc}\n")
         writer.add_scalar("AUC/val", val_auc, epoch)
 
-        # Visualize node embeddings of the full validation set
+        # Save intermediate representations and IDs every 5 epochs
         if epoch % 5 == 0:
-            full_inter_tensor = torch.cat(all_inter, dim=0)
             os.makedirs("node_embeddings", exist_ok=True)
+            full_inter_tensor = torch.cat(all_inter, dim=0)
             torch.save(full_inter_tensor, f"node_embeddings/val_embeddings_epoch_{epoch}.pt")
             np.save(f"node_embeddings/val_sk_ids_epoch_{epoch}.npy", np.array(val_sk_ids))
+            np.save(f"node_embeddings/val_clusters_epoch_{epoch}.npy", np.array(val_clusters))
 
         if val_auc > best_auc_val:
             best_auc_val = val_auc
