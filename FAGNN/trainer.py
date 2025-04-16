@@ -11,7 +11,6 @@ import torch.nn.functional as F
 from dataset import auc_calculate
 from config import opt, get_device
 from model import CLASS_NN_Embed_cluster
-from monitor import track_node_representations
 from utils import intermediate_feature_distance
 from torch.utils.tensorboard import SummaryWriter
 
@@ -128,7 +127,9 @@ def training_model_classification(data_all, clusters, value_column, embed_column
         # Visualize node embeddings of the full validation set
         if epoch % 5 == 0:
             full_inter_tensor = torch.cat(all_inter, dim=0)
-            track_node_representations(epoch, full_inter_tensor, val_sk_ids, output_dir="node_transitions")
+            os.makedirs("node_embeddings", exist_ok=True)
+            torch.save(full_inter_tensor, f"node_embeddings/val_embeddings_epoch_{epoch}.pt")
+            np.save(f"node_embeddings/val_sk_ids_epoch_{epoch}.npy", np.array(val_sk_ids))
 
         if val_auc > best_auc_val:
             best_auc_val = val_auc
