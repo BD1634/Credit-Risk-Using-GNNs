@@ -1,7 +1,11 @@
-/FAGNN/dataset
-/FAGNN/runs
-/FAGNN/node_transitions
-/FAGNN/models
+/FAGNN_base/dataset
+/FAGNN_base/runs
+/FAGNN_base/node_transitions
+/FAGNN_base/models
+/FAGNN_optimized/dataset
+/FAGNN_optimized/runs
+/FAGNN_optimized/node_transitions
+/FAGNN_optimized/models
 /SAGNN/dataset
 /SAGNN/runs
 /SAGNN/node_transitions
