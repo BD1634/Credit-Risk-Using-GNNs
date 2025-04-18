@@ -9,7 +9,7 @@ logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO)
 
 def check_time_features(df):
     time_cols = [col for col in df.columns if 'DAYS_' in col or 'MONTHS_' in col]
-    logging.info(f"Time‑related columns count: {len(time_cols)}")
+    logging.info(f"Time - related columns count: {len(time_cols)}")
     for col in time_cols[:10]:  # print first 10 to avoid clogging output
         logging.debug(f"{col}: min={df[col].min()}, max={df[col].max()}, nulls={df[col].isnull().sum()}")
 
@@ -37,7 +37,7 @@ def main():
     best_model_weights = torch.load(best_model_path, weights_only=True)
 
     total_time = time.time() - start_time
-    logging.info(f"Finished in {total_time/60:.2f} mins ‑ Best AUC: {best_auc}")
+    logging.info(f"Finished in {total_time/60:.2f} mins - Best AUC: {best_auc}")
     return best_model_weights
 
 if __name__ == '__main__':
