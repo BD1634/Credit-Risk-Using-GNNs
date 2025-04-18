@@ -113,3 +113,4 @@ class CLASS_NN_Embed_cluster(nn.Module):
         reconstruction_output = F.relu(self.decoder_2(decoder_hidden))
 
         return classification_output, reconstruction_output, fc2_out
+    
