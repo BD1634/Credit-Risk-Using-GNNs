@@ -20,7 +20,7 @@ try:
 except ImportError:
     cpandas = pd
     GPU_DF_AVAILABLE = False
-RAW_DATA_DIR = os.getenv('RAW_DATA_DIR', r'C:\Users\abhin\Desktop\AdvancedPythonProject\Credit-Risk-Using-GNNs\Data\home-credit-default-risk')
+RAW_DATA_DIR = os.getenv('RAW_DATA_DIR', r'./dataset/home-credit-default-risk/')
 MAX_THREADS = int(os.getenv('MAX_IO_THREADS', '8'))
 def _read_csv(path, dtype=None):
     lib = cpandas if GPU_DF_AVAILABLE else pd
