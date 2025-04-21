@@ -3,6 +3,7 @@ numba
 torch
 numpy
 pandas
+polars
 seaborn
 jupyter
 imblearn
