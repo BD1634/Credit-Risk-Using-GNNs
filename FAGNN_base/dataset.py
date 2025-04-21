@@ -5,6 +5,7 @@ from utils import containsAny
 from imblearn.over_sampling import SMOTE
 from sklearn.metrics import roc_curve, auc
 
+pd.set_option('future.no_silent_downcasting', True)
 
 def data_preprocess(df_data):
     list_columns = df_data.columns.tolist()

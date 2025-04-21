@@ -3,6 +3,7 @@ import os
 import time
 import pickle
 import atexit
+import logging
 from tqdm import tqdm
 import multiprocessing
 from config import opt
@@ -21,11 +22,17 @@ def cleanup_resources():
 atexit.register(cleanup_resources)
 
 
+# def check_time_features(df):
+#     time_cols = [col for col in df.columns if 'DAYS_' in col or 'MONTHS_' in col]
+#     print(f"\n🕒 Time-related columns in data:")
+#     for col in time_cols:
+#         print(f"{col}: min={df[col].min()}, max={df[col].max()}, nulls={df[col].isnull().sum()}")
+
 def check_time_features(df):
     time_cols = [col for col in df.columns if 'DAYS_' in col or 'MONTHS_' in col]
-    print(f"\n🕒 Time-related columns in data:")
-    for col in time_cols:
-        print(f"{col}: min={df[col].min()}, max={df[col].max()}, nulls={df[col].isnull().sum()}")
+    logging.info(f"Time - related columns count: {len(time_cols)}")
+    for col in time_cols[:10]:  # print first 10 to avoid clogging output
+        logging.debug(f"{col}: min={df[col].min()}, max={df[col].max()}, nulls={df[col].isnull().sum()}")
 
 
 def main():
