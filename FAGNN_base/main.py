@@ -1,4 +1,4 @@
-# ---- main.py ----
+# # ---- main.py ----
 import os
 import time
 import pickle
@@ -11,6 +11,8 @@ from trainer import training_model_classification
 from data_preprocessing import data_loaded, feature_engineering
 from dataset import data_preprocess, cluster_analysis, data_cluster
 
+logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO)
+
 # Add this function to clean up multiprocessing resources
 def cleanup_resources():
     # Force cleanup of multiprocessing resources
@@ -22,17 +24,13 @@ def cleanup_resources():
 atexit.register(cleanup_resources)
 
 
-# def check_time_features(df):
-#     time_cols = [col for col in df.columns if 'DAYS_' in col or 'MONTHS_' in col]
-#     print(f"\n🕒 Time-related columns in data:")
-#     for col in time_cols:
-#         print(f"{col}: min={df[col].min()}, max={df[col].max()}, nulls={df[col].isnull().sum()}")
-
 def check_time_features(df):
     time_cols = [col for col in df.columns if 'DAYS_' in col or 'MONTHS_' in col]
-    logging.info(f"Time - related columns count: {len(time_cols)}")
-    for col in time_cols[:10]:  # print first 10 to avoid clogging output
-        logging.debug(f"{col}: min={df[col].min()}, max={df[col].max()}, nulls={df[col].isnull().sum()}")
+    print(f"\n🕒 Time-related columns in data: {len(time_cols)} columns total")
+    # Optional: you could still print min/max/null statistics as a summary
+    print(f"Range examples - min: {min([df[col].min() for col in time_cols])}, " 
+          f"max: {max([df[col].max() for col in time_cols])}")
+    print(f"Total null values across time columns: {sum([df[col].isnull().sum() for col in time_cols])}")
 
 
 def main():
