@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from sklearn.manifold import TSNE
 from pyvis.network import Network
 from sklearn.metrics.pairwise import cosine_similarity
+from matplotlib.lines import Line2D
 
 # Set backend for headless environments
 import matplotlib
@@ -21,9 +22,14 @@ def load_saved_data(epoch, folder="node_embeddings"):
     embeddings = torch.load(os.path.join(folder, f"lstm_epoch_{epoch}.pt"), map_location="cpu")
     sk_ids = np.load(os.path.join(folder, f"sk_ids_epoch_{epoch}.npy"))
     clusters = np.load(os.path.join(folder, f"clusters_epoch_{epoch}.npy"))
-    return embeddings, sk_ids, clusters
+    
+    # Try to load labels if they exist
+    labels_path = os.path.join(folder, f"labels_epoch_{epoch}.npy")
+    labels = np.load(labels_path) if os.path.exists(labels_path) else None
+    
+    return embeddings, sk_ids, clusters, labels
 
-def plot_tsne(embeddings, sk_ids, clusters, epoch, save_dir="graphs", sample_size=None):
+def plot_tsne(embeddings, sk_ids, clusters, epoch, save_dir="graphs", sample_size=None, labels=None):
     ensure_dir(save_dir)
     
     # Optional sampling for large datasets
@@ -31,9 +37,11 @@ def plot_tsne(embeddings, sk_ids, clusters, epoch, save_dir="graphs", sample_siz
         indices = np.random.choice(len(embeddings), sample_size, replace=False)
         sample_embeddings = embeddings[indices]
         sample_clusters = clusters[indices]
+        sample_labels = labels[indices] if labels is not None else None
     else:
         sample_embeddings = embeddings
         sample_clusters = clusters
+        sample_labels = labels
     
     # Run t-SNE
     tsne = TSNE(n_components=2, perplexity=min(30, len(sample_embeddings)-1), 
@@ -41,7 +49,32 @@ def plot_tsne(embeddings, sk_ids, clusters, epoch, save_dir="graphs", sample_siz
     reduced = tsne.fit_transform(sample_embeddings.detach().numpy())
 
     plt.figure(figsize=(10, 8))
-    plt.scatter(reduced[:, 0], reduced[:, 1], c=sample_clusters, cmap='tab10', alpha=0.7)
+    
+    # Color based on risk levels if labels are provided
+    if sample_labels is not None:
+        # Create a custom colormap for risk levels
+        colors = []
+        for label in sample_labels:
+            if label == 0:  # Low risk
+                colors.append('green')
+            elif label == 1:  # Medium risk
+                colors.append('yellow')
+            else:  # High risk
+                colors.append('red')
+        
+        plt.scatter(reduced[:, 0], reduced[:, 1], c=colors, alpha=0.7)
+        
+        # Create legend for risk levels
+        legend_elements = [
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='green', markersize=10, label='Low Risk'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='yellow', markersize=10, label='Medium Risk'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=10, label='High Risk')
+        ]
+        plt.legend(handles=legend_elements)
+    else:
+        # Default coloring by clusters
+        plt.scatter(reduced[:, 0], reduced[:, 1], c=sample_clusters, cmap='tab10', alpha=0.7)
+    
     plt.title(f"t-SNE Visualization - Epoch {epoch}" + 
               (f" (Sampled {sample_size} nodes)" if sample_size else ""))
     plt.xlabel("t-SNE Dimension 1")
@@ -55,7 +88,7 @@ def plot_tsne(embeddings, sk_ids, clusters, epoch, save_dir="graphs", sample_siz
     print(f"[✓] t-SNE saved to: {save_path}")
 
 def plot_graph_dynamic_pyvis(embeddings, sk_ids, epoch, threshold=0.85, 
-                            save_dir="graphs", max_nodes=500, max_edges=1000):
+                            save_dir="graphs", max_nodes=500, max_edges=1000, labels=None):
     ensure_dir(save_dir)
     
     # Sample nodes if too many
@@ -63,6 +96,8 @@ def plot_graph_dynamic_pyvis(embeddings, sk_ids, epoch, threshold=0.85,
         indices = np.random.choice(len(sk_ids), max_nodes, replace=False)
         embeddings = embeddings[indices]
         sk_ids = sk_ids[indices]
+        if labels is not None:
+            labels = labels[indices]
     
     # Compute similarities more efficiently
     normed_embeddings = F.normalize(embeddings, dim=1).cpu().numpy()
@@ -74,7 +109,18 @@ def plot_graph_dynamic_pyvis(embeddings, sk_ids, epoch, threshold=0.85,
     
     # Add nodes - more efficient approach
     for i, sk in enumerate(sk_ids):
-        net.add_node(int(sk), label=str(sk), size=10)
+        # Add color based on risk level if labels are provided
+        if labels is not None:
+            if labels[i] == 0:  # Low risk
+                color = '#00cc00'  # Green
+            elif labels[i] == 1:  # Medium risk
+                color = '#ffcc00'  # Yellow
+            else:  # High risk
+                color = '#cc0000'  # Red
+            
+            net.add_node(int(sk), label=str(sk), size=10, color=color)
+        else:
+            net.add_node(int(sk), label=str(sk), size=10)
     
     # Add edges - vectorized approach with edge limit
     edge_count = 0
@@ -121,16 +167,16 @@ def plot_graph_dynamic_pyvis(embeddings, sk_ids, epoch, threshold=0.85,
 
 def visualize_epoch(epoch, node_folder="node_embeddings", save_dir="graphs", 
                    threshold=0.85, max_nodes=500, max_edges=1000, sample_size=None):
-    embeddings, sk_ids, clusters = load_saved_data(epoch, folder=node_folder)
+    embeddings, sk_ids, clusters, labels = load_saved_data(epoch, folder=node_folder)
     
     print(f"Dataset size: {len(sk_ids)} nodes")
     
     # t-SNE visualization
-    plot_tsne(embeddings, sk_ids, clusters, epoch, save_dir, sample_size)
+    plot_tsne(embeddings, sk_ids, clusters, epoch, save_dir, sample_size, labels=labels)
     
     # Graph visualization
     plot_graph_dynamic_pyvis(embeddings, sk_ids, epoch, threshold=threshold, 
-                           save_dir=save_dir, max_nodes=max_nodes, max_edges=max_edges)
+                           save_dir=save_dir, max_nodes=max_nodes, max_edges=max_edges, labels=labels)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

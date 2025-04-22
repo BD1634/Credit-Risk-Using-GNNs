@@ -128,10 +128,13 @@ def SMOTE_data(train_df):
     columns = list(train_df.columns)
     columns_copy = columns.copy()
     columns.remove('TARGET')
-    sm = SMOTE(sampling_strategy=1, random_state=42)
+    
+    # For a 70:30 ratio, we want minority:majority = 30:70 = 3:7 = 0.429
+    sm = SMOTE(sampling_strategy=0.429, random_state=42)
     X_res, y_res = sm.fit_resample(train_df[columns], label)
     train_df = pd.DataFrame(data=X_res, columns=columns)
     train_df['TARGET'] = y_res
+    
     return train_df[columns_copy]
 
 
