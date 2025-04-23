@@ -1,10 +1,12 @@
+/FAGNN_base/runs
+/FAGNN_base/graphs
+/FAGNN_base/models
+/FAGNN_base/dataset
+/FAGNN_base/node_embeddings
+/FAGNN_base/interpretability
 /FAGNN_optimized/runs
 /FAGNN_optimized/graphs
 /FAGNN_optimized/models
 /FAGNN_optimized/dataset
 /FAGNN_optimized/node_embeddings
 /FAGNN_optimized/interpretability
-/SAGNN/runs
-/SAGNN/models
-/SAGNN/dataset
-/SAGNN/node_transitions
