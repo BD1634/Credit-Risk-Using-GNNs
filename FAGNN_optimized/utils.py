@@ -1,32 +1,10 @@
-import os
-import numpy as np
-from concurrent.futures import ThreadPoolExecutor
-from numba import njit
+# ---- utils.py ----
 import torch
+import numpy as np
 
-try:
-    import cupy as cnp        
-    backend = "cupy"
-except ImportError:
-    import numpy as cnp         
-    backend = "numpy"
 
-import sys
-sys.modules["np"] = cnp         
-np = cnp
-
-@njit(cache=True)
-def containsAny_numba(seq_arr, aset_arr):
-    """Numba‑JIT accelerated version that checks membership of any char in set."""
-    for c in seq_arr:
-        for a in aset_arr:
-            if c == a:
-                return True
-    return False
-
-def containsAny(seq: str, aset):
-    # Fast path using Python set intersection, fallback to JIT if needed
-    return bool(set(seq) & set(aset))
+def containsAny(seq, aset):
+    return any(i in seq for i in aset)
 
 
 def intermediate_feature_distance(intermediate_features, label_batch):
@@ -40,34 +18,16 @@ def intermediate_feature_distance(intermediate_features, label_batch):
 
 
 def matrix_connection(a, device):
-    """Build adjacency & degree matrices on GPU if possible."""
-    a = a.to(device)
-    a_array = a.cpu().numpy()
-    # build dict of cluster id to indices
-    dict_index = {}
-    for idx, cid in enumerate(a_array):
-        dict_index.setdefault(cid, []).append(idx)
-
-    num_nodes = len(a)
-    # use cupy if device is cuda
-    if device.type == 'cuda':
-        import cupy as cp
-        matrix_connect = cp.zeros((num_nodes, num_nodes), dtype=cp.float32)
-        degree_matrix = cp.zeros((num_nodes, num_nodes), dtype=cp.float32)
-    else:
-        matrix_connect = np.zeros((num_nodes, num_nodes), dtype=np.float32)
-        degree_matrix = np.zeros((num_nodes, num_nodes), dtype=np.float32)
-
-    for row_idx, cid in enumerate(a_array):
-        neighbors = dict_index[cid]
-        if device.type == 'cuda':
-            matrix_connect[row_idx, neighbors] = 1
-        else:
-            matrix_connect[row_idx][neighbors] = 1
-        degree_matrix[row_idx][row_idx] = len(neighbors)
-
-    # convert to torch tensors
-    tc = torch.as_tensor(matrix_connect, device=device)
-    td = torch.as_tensor(degree_matrix, device=device)
-    td = torch.inverse(torch.sqrt(td))
-    return tc, td
+    a = a.to('cpu')
+    a_array = a.numpy()
+    dict_index = {i.numpy().tolist(): sum(np.argwhere(a_array == i.numpy()).tolist(), []) for i in a.unique()}
+    matrix_connect = np.zeros((len(a), len(a)))
+    degree_matrix = np.zeros((len(a), len(a)))
+    for index_column, i in enumerate(a):
+        for j in dict_index[i.numpy().tolist()]:
+            matrix_connect[index_column][j] = 1
+        degree_matrix[index_column][index_column] = len(dict_index[i.numpy().tolist()])
+    matrix_connect = torch.tensor(matrix_connect, dtype=torch.float32)
+    degree_matrix = torch.tensor(degree_matrix, dtype=torch.float32)
+    degree_matrix = torch.inverse(torch.sqrt(degree_matrix))
+    return matrix_connect.to(device), degree_matrix.to(device)

@@ -1,10 +1,10 @@
 tqdm
+shap
+numba
+torch
 numpy
 pandas
-cupy-cuda12x            # GPU-accelerated drop‑in replacement for NumPy
-cudf-cu12x              # GPU DataFrame library (cpandas)
-numba                   # JIT compiler for Python & NumPy
-pyarrow
+polars
 seaborn
 jupyter
 imblearn
@@ -12,4 +12,3 @@ ipykernel
 matplotlib
 tensorboard
 scikit-learn
-torch>=2.0

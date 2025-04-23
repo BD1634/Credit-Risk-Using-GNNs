@@ -1,31 +1,13 @@
+# ---- dataset.py ----
 import numpy as np
-from numba import njit, prange
-try:
-    import cudf as cpandas
-    GPU_AVAILABLE = True
-    import cupy as cnumpy
-except ImportError:
-    import pandas as cpandas
-    GPU_AVAILABLE = False
-    cnumpy = np
 import pandas as pd
 from utils import containsAny
-
 from imblearn.over_sampling import SMOTE
 from sklearn.metrics import roc_curve, auc
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
 
-
-
-@njit(cache=True, parallel=True, fastmath=True)
-def normalize_min_max(arr, arr_min, arr_max):
-    out = np.empty_like(arr, dtype=np.float32)
-    diff = arr_max - arr_min
-    for i in prange(arr.shape[0]):
-        if diff != 0.0:
-            out[i] = (arr[i] - arr_min) / diff
-        else:
-            out[i] = 0.0
-    return out
+pd.set_option('future.no_silent_downcasting', True)
 
 def data_preprocess(df_data):
     list_columns = df_data.columns.tolist()
@@ -49,14 +31,15 @@ def data_preprocess(df_data):
     columns_value_selected = list(set(col for col in columns_value_selected if col in df_data.columns))
     columns_embedd_selected = [col for col in columns_embedd_selected if col in df_data.columns]
 
-    # Fill NA & normalize numeric columns using numba kernel
-    df_data[columns_value_selected] = df_data[columns_value_selected].fillna(0)
     for col in columns_value_selected:
-        col_min = df_data[col].min()
-        col_max = df_data[col].max()
-        df_data[col] = normalize_min_max(df_data[col].to_numpy(dtype=np.float32), col_min, col_max)
+        # df_data[col] = df_data[col].fillna(0)
+        df_data[col] = df_data[col].fillna(0).infer_objects(copy=False)
 
-    # encode categorical
+    df_data[columns_value_selected] = (
+        (df_data[columns_value_selected] - df_data[columns_value_selected].min()) /
+        (df_data[columns_value_selected].max() - df_data[columns_value_selected].min())
+    ).fillna(0)
+
     start_encode = 0
     for column in columns_embedd_selected:
         unique_vals = df_data[column].unique()
@@ -66,29 +49,94 @@ def data_preprocess(df_data):
 
     return df_data, columns_value_selected, columns_embedd_selected, start_encode
 
+
 def cluster_analysis(data_all, theta_m, theta_u):
     nums = len(data_all)
     dict_column = {col: (len(data_all[col][data_all[col] == 0]) / nums, len(data_all[col].unique())) for col in data_all.columns}
     return [col for col, (zero_ratio, unique_vals) in dict_column.items() if zero_ratio < theta_m and unique_vals < theta_u]
 
-def data_cluster(df_data, columns_object):
-    df_data[columns_object] = df_data[columns_object].fillna(0)
-    groups = df_data.groupby(columns_object)
-    dict_group = {}
-    for count, (_, group) in enumerate(groups):
-        dict_group.update({id_val: count for id_val in group['SK_ID_CURR']})
-    return df_data['SK_ID_CURR'].map(dict_group).tolist()
+
+def data_cluster(df_data, columns_object, columns_embedd_selected=None, n_clusters=100):
+    """
+    Improved clustering function using PCA + K-means with backward compatibility
+    
+    Args:
+        df_data: DataFrame containing the data
+        columns_object: List of categorical columns (for backward compatibility)
+        columns_embedd_selected: List of encoded categorical columns (optional)
+        n_clusters: Target number of clusters (default 100)
+        
+    Returns:
+        List of cluster assignments for each row in df_data
+    """
+    # Check if we're being called with the old signature
+    if columns_embedd_selected is None:
+        # We're in legacy mode - columns_object contains the categorical columns
+        # Extract numerical columns for clustering
+        numerical_cols = [col for col in df_data.columns 
+                         if col not in columns_object 
+                         and col not in ['SK_ID_CURR', 'TARGET']
+                         and df_data[col].dtype in ['int64', 'float64']]
+        
+        # Apply PCA + K-means on the available numerical columns
+        features = numerical_cols
+        X = df_data[features].fillna(0)
+        
+        # Only proceed if we have features to work with
+        if len(features) > 0:
+            # Apply PCA for dimensionality reduction
+            n_components = min(min(50, len(features)), len(X) - 1)
+            pca = PCA(n_components=n_components, random_state=42)
+            X_reduced = pca.fit_transform(X)
+            
+            # Apply K-means clustering
+            kmeans = KMeans(n_clusters=min(n_clusters, len(X) - 1), random_state=42, n_init=10)
+            clusters = kmeans.fit_predict(X_reduced)
+            
+            # Create mapping from SK_ID_CURR to cluster ID
+            cluster_mapping = {id_val: cluster for id_val, cluster in zip(df_data['SK_ID_CURR'], clusters)}
+            
+            # Return cluster assignments
+            return df_data['SK_ID_CURR'].map(cluster_mapping).tolist()
+        else:
+            # Fallback to a single cluster if no features available
+            return [0] * len(df_data)
+    else:
+        # We're in new mode - using the improved clustering as originally designed
+        # Prepare features (both numerical and encoded categorical)
+        features = columns_object + columns_embedd_selected
+        X = df_data[features].fillna(0)
+        
+        # Apply PCA for dimensionality reduction
+        n_components = min(min(50, len(features)), len(X) - 1)
+        pca = PCA(n_components=n_components, random_state=42)
+        X_reduced = pca.fit_transform(X)
+        
+        # Apply K-means clustering
+        kmeans = KMeans(n_clusters=min(n_clusters, len(X) - 1), random_state=42, n_init=10)
+        clusters = kmeans.fit_predict(X_reduced)
+        
+        # Create mapping from SK_ID_CURR to cluster ID
+        cluster_mapping = {id_val: cluster for id_val, cluster in zip(df_data['SK_ID_CURR'], clusters)}
+        
+        # Return cluster assignments
+        return df_data['SK_ID_CURR'].map(cluster_mapping).tolist()
+
 
 def SMOTE_data(train_df):
     label = train_df['TARGET']
     columns = list(train_df.columns)
     columns_copy = columns.copy()
     columns.remove('TARGET')
-    sm = SMOTE(sampling_strategy=1, random_state=42, n_jobs=-1)
+    
+    # For a 70:30 ratio, we want minority:majority = 30:70 = 3:7 = 0.429
+    sm = SMOTE(sampling_strategy=0.429, random_state=42)
     X_res, y_res = sm.fit_resample(train_df[columns], label)
     train_df = pd.DataFrame(data=X_res, columns=columns)
     train_df['TARGET'] = y_res
+    
     return train_df[columns_copy]
+
 
 def auc_calculate(groundtruth, predicted_prob):
     fpr, tpr, _ = roc_curve(groundtruth, predicted_prob, pos_label=1)
