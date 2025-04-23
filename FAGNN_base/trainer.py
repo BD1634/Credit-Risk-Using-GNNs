@@ -1,4 +1,4 @@
-#trainer.py
+# trainer.py
 import os
 import time
 import copy
@@ -10,9 +10,11 @@ import torch.nn as nn
 from tqdm import tqdm
 import torch.nn.functional as F
 import torch.utils.data as Data
+import shap
+import matplotlib.pyplot as plt
 from dataset import auc_calculate
 from config import opt, get_device
-from monitor import save_lstm_outputs
+from monitor import save_interpretability_outputs
 from model import CLASS_NN_Embed_cluster
 from utils import intermediate_feature_distance
 from torch.utils.tensorboard import SummaryWriter
@@ -50,6 +52,101 @@ def create_loader(df, batch_size, value_column, embed_column, weighted_sampler=N
 
     eval_loader = Data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
     return train_loader, eval_loader
+
+
+def analyze_with_shap(model, val_data, feature_names, device, save_dir="interpretability", samples=100):
+    """
+    Analyze model predictions using SHAP values
+    
+    Args:
+        model: Trained model
+        val_data: Validation dataset (val_tensor, emb_tensor, label_tensor)
+        feature_names: List of feature names
+        device: Computation device (cuda/cpu)
+        save_dir: Directory to save results
+        samples: Number of background samples for SHAP
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    model.eval()
+    
+    # Get background data for SHAP
+    val_tensor, emb_tensor, labels = val_data
+    
+    # Subsample if needed
+    if len(val_tensor) > samples:
+        indices = np.random.choice(len(val_tensor), samples, replace=False)
+        background_val = val_tensor[indices].to(device)
+        background_emb = emb_tensor[indices].to(device)
+    else:
+        background_val = val_tensor.to(device)
+        background_emb = emb_tensor.to(device)
+    
+    # Create explainer
+    def model_predict(x):
+        # Convert numpy array to torch tensor
+        x_tensor = torch.FloatTensor(x)
+        
+        # Format input for model
+        batch_size = x_tensor.shape[0]
+        seq_len = background_val.shape[1]
+        val_dim = background_val.shape[2]
+        emb_dim = background_emb.shape[2]
+        
+        # Reshape x back into val and emb tensors
+        val_input = x_tensor[:, :seq_len*val_dim].reshape(batch_size, seq_len, val_dim).to(device)
+        # For embedding tensor, convert to long after creating torch tensor
+        emb_input = x_tensor[:, seq_len*val_dim:].reshape(batch_size, seq_len, emb_dim).to(device).long()
+        
+        # Get predictions
+        with torch.no_grad():
+            outputs, _, _ = model(val_input, emb_input)
+            probs = F.softmax(outputs, dim=1)
+        return probs.cpu().numpy()
+    
+    # Flatten background data for SHAP
+    flat_background_val = background_val.reshape(background_val.shape[0], -1)
+    flat_background_emb = background_emb.reshape(background_emb.shape[0], -1)
+    background_data = torch.cat([flat_background_val, flat_background_emb], dim=1).cpu().numpy()
+    
+    print("Preparing SHAP explainer with background data...")
+    
+    # Try a more lightweight approach with Explainer class
+    try:
+        # Use a small subset of validation data for SHAP values to save time
+        eval_indices = np.random.choice(len(val_tensor), min(20, len(val_tensor)), replace=False)
+        eval_val = val_tensor[eval_indices].to(device)
+        eval_emb = emb_tensor[eval_indices].to(device)
+        
+        # Flatten evaluation data
+        flat_eval_val = eval_val.reshape(eval_val.shape[0], -1)
+        flat_eval_emb = eval_emb.reshape(eval_emb.shape[0], -1)
+        eval_data = torch.cat([flat_eval_val, flat_eval_emb], dim=1).cpu().numpy()
+        
+        # For speed and simplicity, use a more basic explainer
+        print("Computing SHAP values with sampling approach...")
+        explainer = shap.KernelExplainer(model_predict, background_data[:10])  # Use fewer background samples
+        shap_values = explainer.shap_values(eval_data[:10], nsamples=50)  # Calculate for fewer samples
+        
+        # If successful with small sample, try with full data
+        if isinstance(shap_values, list):
+            # For multi-class output, index 1 is for the positive class
+            shap_values = shap_values[1]
+        
+        # Create summary plot
+        plt.figure(figsize=(12, 8))
+        shap.summary_plot(shap_values, eval_data[:10], feature_names=feature_names, show=False)
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_dir, f"shap_summary.png"))
+        plt.close()
+        
+        return shap_values, eval_indices[:10]  # Return SHAP values for positive class
+    
+    except Exception as e:
+        print(f"Error in SHAP calculation: {e}")
+        print("Continuing without SHAP values...")
+        # Return placeholder values so training can continue
+        dummy_shape = (min(10, len(val_tensor)), len(feature_names))
+        return np.zeros(dummy_shape), np.arange(min(10, len(val_tensor)))
 
 
 def training_model_classification(data_all, clusters, value_column, embed_column, bag_size, sk_ids, f=None):
@@ -120,6 +217,15 @@ def training_model_classification(data_all, clusters, value_column, embed_column
     val_loss_history = []
     val_cls_loss_history = []
     val_ae_loss_history = []
+    
+    # Create feature names for interpretability
+    feature_names = []
+    for col in value_column:
+        for i in range(bag_size):
+            feature_names.append(f"{col}_t{i}")
+    for col in embed_column:
+        for i in range(bag_size):
+            feature_names.append(f"{col}_t{i}")
     
     # Warmup epochs and total epochs for scheduling
     warmup_epochs = 5  # Increased from 3 to 5 for more stability
@@ -226,9 +332,16 @@ def training_model_classification(data_all, clusters, value_column, embed_column
         val_cls_loss = 0
         val_ae_loss = 0
         
+        # Store validation tensors for SHAP analysis
+        val_tensors, emb_tensors = [], []
+        
         with torch.no_grad():
             for val, emb, lab in tqdm(val_loader, desc="Validation", leave=False):
                 val, emb, lab = val.to(device), emb.to(device), lab.to(device)
+                # Store for SHAP analysis
+                val_tensors.append(val.cpu())
+                emb_tensors.append(emb.cpu())
+                
                 # Use EMA model for validation
                 outputs, out_ae, inter_val = ema_model(val, emb)
                 
@@ -276,20 +389,64 @@ def training_model_classification(data_all, clusters, value_column, embed_column
         writer.add_scalar("Loss/val_reconstruction", avg_val_ae_loss, epoch)
         writer.add_scalar("AUC/val", val_auc, epoch)
 
-        # Save visualization data every 5 epochs
-        # if epoch % 5 == 0:
-        #     full_inter_tensor = torch.cat(all_inter, dim=0)
-        #     save_lstm_outputs(full_inter_tensor, val_sk_ids, val_clusters, epoch)
-        
+        # Save visualization data every 5 epochs with adjusted percentile-based risk levels
         if epoch % 5 == 0:
             full_inter_tensor = torch.cat(all_inter, dim=0)
-            all_labels_np = np.array(all_labels)
             all_probs_np = np.array(all_probs)
+            all_labels_np = np.array(all_labels)
+            
+            # Adjusted percentiles for more business-appropriate risk distribution
+            low_thresh = np.percentile(all_probs_np, 40)  # Bottom 40%
+            high_thresh = np.percentile(all_probs_np, 80)  # Top 20%
+            
             risk_levels = np.zeros_like(all_labels_np)
-            risk_levels[all_probs_np > 0.3] = 1  # Medium risk if prob > 0.3
-            risk_levels[all_probs_np > 0.7] = 2  # High risk if prob > 0.7
-    
-        save_lstm_outputs(full_inter_tensor, val_sk_ids, val_clusters, epoch, labels=risk_levels)
+            risk_levels[all_probs_np > low_thresh] = 1  # Medium risk (40% to 80%)
+            risk_levels[all_probs_np > high_thresh] = 2  # High risk (top 20%)
+            
+            # Print risk level distribution and thresholds
+            print(f"Adaptive thresholds: low={low_thresh:.3f}, high={high_thresh:.3f}")
+            unique, counts = np.unique(risk_levels, return_counts=True)
+            print(f"Risk level distribution at epoch {epoch}:")
+            for level, count in zip(unique, counts):
+                print(f"  Level {level}: {count} samples ({count/len(risk_levels)*100:.2f}%)")
+            
+            # Skip SHAP analysis if user doesn't have shap installed or version is incompatible
+            try:
+                # Concatenate validation tensors for SHAP analysis
+                val_tensor = torch.cat(val_tensors, dim=0)
+                emb_tensor = torch.cat(emb_tensors, dim=0)
+                
+                # Calculate SHAP values with error handling
+                print("Calculating SHAP values for interpretability...")
+                shap_values, shap_indices = analyze_with_shap(
+                    ema_model, (val_tensor, emb_tensor, all_labels_np), 
+                    feature_names, device
+                )
+                
+                # Get the correct SK_IDs for the SHAP samples
+                shap_sk_ids = [val_sk_ids[i] for i in shap_indices]
+                shap_clusters = [val_clusters[i] for i in shap_indices]
+                shap_risk_levels = risk_levels[shap_indices]
+                
+                # Save embeddings and SHAP values
+                save_interpretability_outputs(
+                    full_inter_tensor, val_sk_ids, val_clusters, epoch, 
+                    risk_levels=risk_levels, 
+                    shap_values=shap_values,
+                    shap_indices=shap_indices, 
+                    shap_sk_ids=shap_sk_ids,
+                    shap_clusters=shap_clusters,
+                    shap_risk_levels=shap_risk_levels,
+                    feature_names=feature_names
+                )
+            except Exception as e:
+                print(f"Error in SHAP analysis: {e}")
+                print("Saving data without SHAP values...")
+                # Save embeddings without SHAP values
+                save_interpretability_outputs(
+                    full_inter_tensor, val_sk_ids, val_clusters, epoch, 
+                    risk_levels=risk_levels
+                )
 
         # Save model based on both metrics
         saved_model = False

@@ -2,6 +2,7 @@
 /FAGNN_base/runs
 /FAGNN_base/graphs
 /FAGNN_base/node_embeddings
+/FAGNN_base/interpretability
 /FAGNN_base/models
 /FAGNN_optimized/dataset
 /FAGNN_optimized/runs
