@@ -418,7 +418,10 @@ def plot_graph_with_explanations(embeddings, sk_ids, epoch, shap_data=None, thre
     """)
     
     save_path = os.path.join(save_dir, f"interpretable_graph_epoch{epoch}.html")
-    net.save_graph(save_path)
+    # net.save_graph(save_path)
+    html_content = net.generate_html()
+    with open(save_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
     print(f"[✓] Interpretable graph saved to: {save_path} with {len(sk_ids)} nodes and {edge_count} edges")
 
 def visualize_epoch(epoch, node_folder="node_embeddings", save_dir="graphs", 

@@ -12,3 +12,6 @@ ipykernel
 matplotlib
 tensorboard
 scikit-learn
+pydataframe
+pyarrow
+pyvis
